@@ -1,12 +1,12 @@
+# painel_futebol.py (Versão para o Render)
 import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime, date
 
 # ==========================
-# FUNÇÕES OTIMIZADAS (CONEXÃO DIRETA)
+# FUNÇÕES (CONEXÃO DIRETA COM HEADERS)
 # ==========================
-
 @st.cache_data(ttl=60)
 def buscar_jogo(time_procurado, data_selecionada):
     if not time_procurado:
@@ -15,7 +15,6 @@ def buscar_jogo(time_procurado, data_selecionada):
     data_formatada = data_selecionada.strftime("%Y-%m-%d")
     url_alvo = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{data_formatada}"
     
-    # ATUALIZAÇÃO ESTRATÉGICA: Adicionando headers para simular um navegador
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Referer': 'https://www.sofascore.com/',
@@ -23,8 +22,7 @@ def buscar_jogo(time_procurado, data_selecionada):
     }
 
     try:
-        # Conexão direta, sem proxy, mas com headers
-        response = requests.get(url_alvo, headers=headers, timeout=15)
+        response = requests.get(url_alvo, headers=headers, timeout=20)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         return None, f"Erro de conexão com a API do Sofascore. O erro foi: {e}"
@@ -54,7 +52,7 @@ def buscar_estatisticas(event_id):
     }
     
     try:
-        response = requests.get(url_alvo, headers=headers, timeout=15)
+        response = requests.get(url_alvo, headers=headers, timeout=20)
         response.raise_for_status()
         dados = response.json()
         if "error" in dados: return None
@@ -76,9 +74,7 @@ def buscar_estatisticas(event_id):
     
     return estatisticas if estatisticas else None
 
-# ==========================
-# Interface do Streamlit (sem alterações)
-# ==========================
+# --- A INTERFACE DO STREAMLIT CONTINUA A MESMA ---
 st.set_page_config(page_title="Painel de Futebol Ao Vivo", layout="wide", initial_sidebar_state="collapsed")
 st.title("⚽ Painel de Futebol Ao Vivo")
 st.markdown("Dados fornecidos pela API do Sofascore.")
@@ -109,10 +105,8 @@ if st.button("🔍 Buscar Jogo / Atualizar"):
             with c3:
                 st.metric(label=f"✈️ {jogo['Time Visitante']}", value=jogo['Placar Visitante'])
             st.divider()
-
             with st.spinner("Buscando estatísticas detalhadas..."):
                 stats = buscar_estatisticas(jogo["Event ID"])
-
             if stats:
                 st.subheader("📊 Estatísticas da Partida")
                 df_stats = pd.DataFrame(stats).T.reset_index()
