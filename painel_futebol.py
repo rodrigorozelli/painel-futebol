@@ -2,66 +2,67 @@ import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime
+# A biblioteca 'os' não é mais necessária para ler os secrets no Streamlit
 
 # ==========================
 # Funções
 # ==========================
 
-# Usar o cache do Streamlit para evitar fazer a mesma requisição várias vezes seguidas
-@st.cache_data(ttl=60)  # Cache por 60 segundos
+@st.cache_data(ttl=60)
 def buscar_jogo(time_procurado):
-    """Busca um jogo que contenha o nome do time fornecido."""
+    """Busca um jogo usando o ScraperAPI como proxy."""
     if not time_procurado:
         return None, "Por favor, digite o nome de um time."
 
-    url = "https://api-web.365scores.com/web/games/current"
-    params = {"sport": 1, "lang": "pt", "timezone": "-3"}
-    # Usar um User-Agent mais comum pode ajudar a evitar bloqueios simples
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+    # Pega a chave da API diretamente dos secrets do Streamlit
+    # st.secrets é um dicionário. Acessamos a chave que definimos no secrets.toml
+    try:
+        api_key = st.secrets["SCRAPERAPI_KEY"]
+    except KeyError:
+        return None, "ERRO DE CONFIGURAÇÃO: A chave SCRAPERAPI_KEY não foi encontrada nos Secrets do seu app Streamlit."
+
+    url_alvo = "https://api-web.365scores.com/web/games/current?sport=1&lang=pt&timezone=-3"
+    proxy_url = f"http://api.scraperapi.com?api_key={api_key}&url={url_alvo}"
 
     try:
-        response = requests.get(url, params=params, headers=headers, timeout=10)
-        response.raise_for_status()  # Lança um erro para status 4xx/5xx
+        response = requests.get(proxy_url, timeout=20)
+        response.raise_for_status()
     except requests.exceptions.RequestException as e:
-        # Retorna uma mensagem de erro amigável em caso de falha na conexão
-        return None, f"Erro de conexão ao buscar jogos. A plataforma pode estar bloqueando o acesso. Tente novamente mais tarde. Detalhe: {e}"
+        return None, f"Erro de conexão através do proxy. Detalhe: {e}"
 
     jogos = response.json().get("games", [])
     for jogo in jogos:
         time_casa = jogo["homeTeam"]["name"]
-        time_visitante =jogo["awayTeam"]["name"]
-
-        # Busca pelo nome do time (ignorando maiúsculas/minúsculas)
+        time_visitante = jogo["awayTeam"]["name"]
         if time_procurado.lower() in time_casa.lower() or time_procurado.lower() in time_visitante.lower():
             game_id = jogo["id"]
             hora = datetime.fromtimestamp(jogo["startTime"] / 1000).strftime("%d/%m/%Y %H:%M")
-
             dados_basicos = {
-                "Data/Hora": hora,
-                "Time Casa": time_casa,
-                "Placar Casa": jogo.get("homeScore", {}).get("current", 0),
-                "Time Visitante": time_visitante,
-                "Placar Visitante": jogo.get("awayScore", {}).get("current", 0),
-                "Status": jogo.get("status", {}).get("description", "Desconhecido"),
-                "Game ID": game_id
+                "Data/Hora": hora, "Time Casa": time_casa, "Placar Casa": jogo.get("homeScore", {}).get("current", 0),
+                "Time Visitante": time_visitante, "Placar Visitante": jogo.get("awayScore", {}).get("current", 0),
+                "Status": jogo.get("status", {}).get("description", "Desconhecido"), "Game ID": game_id
             }
-            return dados_basicos, None  # Retorna o jogo e nenhuma mensagem de erro
+            return dados_basicos, None
 
     return None, f"Nenhum jogo ao vivo ou recente encontrado para '{time_procurado}'."
 
-@st.cache_data(ttl=60) # Cache por 60 segundos
+@st.cache_data(ttl=60)
 def buscar_estatisticas(game_id):
-    """Busca as estatísticas de um jogo específico pelo seu ID."""
-    url = f"https://api-web.365scores.com/web/games/{game_id}/stats"
-    params = {"lang": "pt"}
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-
+    """Busca estatísticas usando o ScraperAPI como proxy."""
     try:
-        response = requests.get(url, params=params, headers=headers, timeout=10)
+        api_key = st.secrets["SCRAPERAPI_KEY"]
+    except KeyError:
+        return None
+    
+    url_alvo = f"https://api-web.365scores.com/web/games/{game_id}/stats?lang=pt"
+    proxy_url = f"http://api.scraperapi.com?api_key={api_key}&url={url_alvo}"
+    
+    try:
+        response = requests.get(proxy_url, timeout=20)
         response.raise_for_status()
     except requests.exceptions.RequestException:
         return None
-
+        
     stats_data = response.json().get("stats", [])
     if not stats_data:
         return None
@@ -76,20 +77,19 @@ def buscar_estatisticas(game_id):
     return estatisticas
 
 # ==========================
-# Interface do Streamlit
+# Interface do Streamlit (sem alterações na lógica)
 # ==========================
+# ... (o resto do código da interface continua o mesmo do anterior) ...
 
 st.set_page_config(page_title="Painel de Jogo ao Vivo", layout="wide", initial_sidebar_state="collapsed")
 
 st.title("⚽ Painel de Futebol Ao Vivo")
 st.markdown("Acompanhe placares e estatísticas de jogos em tempo real. Digite o nome de um time e clique em buscar.")
 
-# --- Campo de busca ---
 time_digitado = st.text_input("Digite o nome do time:", placeholder="Ex: Flamengo, Real Madrid, Corinthians...")
 
-# --- Botão de busca ---
 if st.button("🔍 Buscar Jogo / Atualizar"):
-    with st.spinner(f"Buscando jogo para '{time_digitado}'..."):
+    with st.spinner(f"Buscando jogo para '{time_digitado}'... (via proxy)"):
         jogo, erro = buscar_jogo(time_digitado)
 
     if erro:
@@ -97,7 +97,6 @@ if st.button("🔍 Buscar Jogo / Atualizar"):
     elif jogo:
         st.success(f"Jogo encontrado para '{time_digitado}'!")
 
-        # --- Exibição do Placar ---
         st.subheader(f"Status: {jogo['Status']} ({jogo['Data/Hora']})")
         col1, col2, col3 = st.columns([2, 1, 2])
         with col1:
@@ -109,7 +108,6 @@ if st.button("🔍 Buscar Jogo / Atualizar"):
 
         st.divider()
 
-        # --- Exibição das Estatísticas ---
         stats = buscar_estatisticas(jogo["Game ID"])
         if stats:
             st.subheader("📊 Estatísticas da Partida")
