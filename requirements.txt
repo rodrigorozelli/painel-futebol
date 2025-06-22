@@ -1,4 +1,4 @@
+# requirements.txt
 streamlit
 pandas
 requests
-cloudscraper
