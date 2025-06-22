@@ -4,40 +4,38 @@ import pandas as pd
 from datetime import datetime, date
 
 # ==========================
-# FUNÇÕES OTIMIZADAS
+# FUNÇÕES OTIMIZADAS (CONEXÃO DIRETA)
 # ==========================
 
 @st.cache_data(ttl=60)
 def buscar_jogo(time_procurado, data_selecionada):
-    """Busca um jogo na API do Sofascore usando ScraperAPI como proxy."""
     if not time_procurado:
         return None, "Por favor, digite o nome de um time."
-
-    try:
-        api_key = st.secrets["SCRAPERAPI_KEY"]
-    except KeyError:
-        return None, "ERRO: Chave SCRAPERAPI_KEY não encontrada nos Secrets. Por favor, adicione-a no painel do Streamlit."
 
     data_formatada = data_selecionada.strftime("%Y-%m-%d")
     url_alvo = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{data_formatada}"
     
-    payload = {'api_key': api_key, 'url': url_alvo}
+    # ATUALIZAÇÃO ESTRATÉGICA: Adicionando headers para simular um navegador
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Referer': 'https://www.sofascore.com/',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+    }
 
     try:
-        response = requests.get('http://api.scraperapi.com', params=payload, timeout=30)
+        # Conexão direta, sem proxy, mas com headers
+        response = requests.get(url_alvo, headers=headers, timeout=15)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
-        return None, f"Erro de conexão através do proxy: {e}"
+        return None, f"Erro de conexão com a API do Sofascore. O erro foi: {e}"
 
     eventos = response.json().get("events", [])
     for evento in eventos:
         time_casa = evento["homeTeam"]["name"]
         time_visitante = evento["awayTeam"]["name"]
-        
         if time_procurado.lower() in time_casa.lower() or time_procurado.lower() in time_visitante.lower():
             placar_casa = evento.get("homeScore", {}).get("current", "-")
             placar_visitante = evento.get("awayScore", {}).get("current", "-")
-            
             dados_basicos = {
                 "Data/Hora": datetime.fromtimestamp(evento["startTimestamp"]).strftime("%d/%m/%Y %H:%M"),
                 "Time Casa": time_casa, "Placar Casa": placar_casa, "Time Visitante": time_visitante,
@@ -49,17 +47,14 @@ def buscar_jogo(time_procurado, data_selecionada):
 
 @st.cache_data(ttl=60)
 def buscar_estatisticas(event_id):
-    """Busca estatísticas na API do Sofascore com a estrutura de loop corrigida."""
-    try:
-        api_key = st.secrets["SCRAPERAPI_KEY"]
-    except KeyError:
-        return None
-    
     url_alvo = f"https://api.sofascore.com/api/v1/event/{event_id}/statistics"
-    payload = {'api_key': api_key, 'url': url_alvo}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Referer': 'https://www.sofascore.com/',
+    }
     
     try:
-        response = requests.get('http://api.scraperapi.com', params=payload, timeout=30)
+        response = requests.get(url_alvo, headers=headers, timeout=15)
         response.raise_for_status()
         dados = response.json()
         if "error" in dados: return None
@@ -67,12 +62,9 @@ def buscar_estatisticas(event_id):
         return None
 
     all_stats_periods = dados.get("statistics", [])
-    if not all_stats_periods:
-        return None
+    if not all_stats_periods: return None
 
     estatisticas = {}
-    
-    # Loop corrigido para percorrer a estrutura correta do JSON
     for period_group in all_stats_periods:
         if period_group.get("period") == "ALL":
             for stat_group in period_group.get("groups", []):
@@ -85,21 +77,18 @@ def buscar_estatisticas(event_id):
     return estatisticas if estatisticas else None
 
 # ==========================
-# INTERFACE DO STREAMLIT
+# Interface do Streamlit (sem alterações)
 # ==========================
 st.set_page_config(page_title="Painel de Futebol Ao Vivo", layout="wide", initial_sidebar_state="collapsed")
-
 st.title("⚽ Painel de Futebol Ao Vivo")
 st.markdown("Dados fornecidos pela API do Sofascore.")
 
-# --- SELETORES DE BUSCA ---
 col1, col2 = st.columns(2)
 with col1:
     time_digitado = st.text_input("Digite o nome do time:", placeholder="Ex: Botafogo, Real Madrid...")
 with col2:
     data_jogo = st.date_input("Selecione a data do jogo", date.today())
 
-# --- LÓGICA DE EXECUÇÃO ---
 if st.button("🔍 Buscar Jogo / Atualizar"):
     if not time_digitado:
         st.warning("Por favor, digite o nome de um time.")
@@ -111,8 +100,6 @@ if st.button("🔍 Buscar Jogo / Atualizar"):
             st.error(erro_jogo)
         elif jogo:
             st.success(f"Jogo encontrado!")
-            
-            # --- Exibição do Placar ---
             st.subheader(f"Status: {jogo['Status']} ({jogo['Data/Hora']})")
             c1, c2, c3 = st.columns([2, 1, 2])
             with c1:
@@ -123,14 +110,12 @@ if st.button("🔍 Buscar Jogo / Atualizar"):
                 st.metric(label=f"✈️ {jogo['Time Visitante']}", value=jogo['Placar Visitante'])
             st.divider()
 
-            # --- Busca e Exibição das Estatísticas ---
             with st.spinner("Buscando estatísticas detalhadas..."):
                 stats = buscar_estatisticas(jogo["Event ID"])
 
             if stats:
                 st.subheader("📊 Estatísticas da Partida")
                 df_stats = pd.DataFrame(stats).T.reset_index()
-                # Renomeia as colunas para clareza
                 df_stats.columns = ["Estatística", jogo['Time Casa'], jogo['Time Visitante']]
                 st.dataframe(df_stats, use_container_width=True, hide_index=True)
             else:
