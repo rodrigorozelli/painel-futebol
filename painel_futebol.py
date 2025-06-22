@@ -4,29 +4,33 @@ import pandas as pd
 from datetime import datetime, date
 
 # ==========================
-# Funções para a API do Sofascore
+# Funções (Sofascore + ScraperAPI)
 # ==========================
 
 @st.cache_data(ttl=60)
-def buscar_jogo_sofascore(time_procurado):
-    """Busca um jogo na API do Sofascore para a data de hoje."""
+def buscar_jogo(time_procurado):
+    """Busca um jogo na API do Sofascore usando ScraperAPI como proxy."""
     if not time_procurado:
         return None, "Por favor, digite o nome de um time."
 
-    # Pega a data de hoje no formato YYYY-MM-DD
+    try:
+        api_key = st.secrets["SCRAPERAPI_KEY"]
+    except KeyError:
+        return None, "ERRO DE CONFIGURAÇÃO: A chave SCRAPERAPI_KEY não foi encontrada nos Secrets. Por favor, adicione-a."
+
     hoje = date.today().strftime("%Y-%m-%d")
-    url = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{hoje}"
+    url_alvo = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{hoje}"
     
-    headers = {"User-Agent": "Mozilla/5.0"} # Sofascore é menos exigente
+    # Payload para o ScraperAPI. Não precisamos de premium ou render para o Sofascore.
+    payload = {'api_key': api_key, 'url': url_alvo}
 
     try:
-        # Conexão direta, sem proxy!
-        response = requests.get(url, headers=headers, timeout=15)
+        # A requisição é feita para o ScraperAPI, que buscará a URL do Sofascore.
+        response = requests.get('http://api.scraperapi.com', params=payload, timeout=25)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
-        return None, f"Erro de conexão com a API do Sofascore. Detalhe: {e}"
+        return None, f"Erro de conexão através do proxy. Detalhe: {e}"
 
-    # A estrutura do JSON é diferente
     eventos = response.json().get("events", [])
     for evento in eventos:
         time_casa = evento["homeTeam"]["name"]
@@ -38,43 +42,38 @@ def buscar_jogo_sofascore(time_procurado):
             
             dados_basicos = {
                 "Data/Hora": datetime.fromtimestamp(evento["startTimestamp"]).strftime("%d/%m/%Y %H:%M"),
-                "Time Casa": time_casa,
-                "Placar Casa": placar_casa,
-                "Time Visitante": time_visitante,
-                "Placar Visitante": placar_visitante,
-                "Status": evento["status"]["description"],
-                "Event ID": evento["id"]
+                "Time Casa": time_casa, "Placar Casa": placar_casa, "Time Visitante": time_visitante,
+                "Placar Visitante": placar_visitante, "Status": evento["status"]["description"], "Event ID": evento["id"]
             }
             return dados_basicos, None
 
     return None, f"Nenhum jogo encontrado para '{time_procurado}' na data de hoje."
 
 @st.cache_data(ttl=60)
-def buscar_estatisticas_sofascore(event_id):
-    """Busca estatísticas na API do Sofascore."""
-    url = f"https://api.sofascore.com/api/v1/event/{event_id}/statistics"
-    headers = {"User-Agent": "Mozilla/5.0"}
-
+def buscar_estatisticas(event_id):
+    """Busca estatísticas na API do Sofascore usando ScraperAPI como proxy."""
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        api_key = st.secrets["SCRAPERAPI_KEY"]
+    except KeyError:
+        return None
+    
+    url_alvo = f"https://api.sofascore.com/api/v1/event/{event_id}/statistics"
+    payload = {'api_key': api_key, 'url': url_alvo}
+    
+    try:
+        response = requests.get('http://api.scraperapi.com', params=payload, timeout=25)
         response.raise_for_status()
-        
-        # A API pode retornar 200 OK mas com erro no corpo do JSON
         dados = response.json()
-        if "error" in dados:
-            return None
-
+        if "error" in dados: return None
     except (requests.exceptions.RequestException, ValueError):
         return None
 
     all_stats = dados.get("statistics", [])
-    if not all_stats:
-        return None
+    if not all_stats: return None
 
     estatisticas = {}
-    # As estatísticas são agrupadas, precisamos iterar sobre elas
     for grupo in all_stats:
-        if grupo.get("period") == "ALL": # Pegar estatísticas do jogo todo
+        if grupo.get("period") == "ALL":
             for stat_item in grupo.get("groups", []):
                 for row in stat_item.get("rows", []):
                     nome = row.get("name")
@@ -85,7 +84,7 @@ def buscar_estatisticas_sofascore(event_id):
     return estatisticas if estatisticas else None
 
 # ==========================
-# Interface do Streamlit (Adaptada)
+# Interface do Streamlit (sem alterações)
 # ==========================
 st.set_page_config(page_title="Painel de Futebol Ao Vivo", layout="wide", initial_sidebar_state="collapsed")
 st.title("⚽ Painel de Futebol Ao Vivo")
@@ -97,14 +96,14 @@ if st.button("🔍 Buscar Jogo / Atualizar"):
     if not time_digitado:
         st.warning("Por favor, digite o nome de um time.")
     else:
-        with st.spinner(f"Buscando jogo para '{time_digitado}'..."):
-            jogo, erro = buscar_jogo_sofascore(time_digitado)
+        with st.spinner(f"Buscando jogo para '{time_digitado}'... (via proxy)"):
+            jogo, erro = buscar_jogo(time_digitado)
         
         if erro:
             st.error(erro)
         elif jogo:
             st.success(f"Jogo encontrado para '{time_digitado}'!")
-
+            # ... (o resto do código da interface continua igual)
             st.subheader(f"Status: {jogo['Status']} ({jogo['Data/Hora']})")
             col1, col2, col3 = st.columns([2, 1, 2])
             with col1:
@@ -113,10 +112,8 @@ if st.button("🔍 Buscar Jogo / Atualizar"):
                 st.markdown("<h1 style='text-align: center; margin-top: 15px;'>X</h1>", unsafe_allow_html=True)
             with col3:
                 st.metric(label=f"✈️ {jogo['Time Visitante']}", value=jogo['Placar Visitante'])
-
             st.divider()
-
-            stats = buscar_estatisticas_sofascore(jogo["Event ID"])
+            stats = buscar_estatisticas(jogo["Event ID"])
             if stats:
                 st.subheader("📊 Estatísticas da Partida")
                 df_stats = pd.DataFrame(stats).T.reset_index()
