@@ -1,32 +1,23 @@
-# painel_futebol.py (Versão para o Render)
+# Versão final com cloudscraper para o Render
 import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime, date
+import cloudscraper
 
-# ==========================
-# FUNÇÕES (CONEXÃO DIRETA COM HEADERS)
-# ==========================
+scraper = cloudscraper.create_scraper()
+
 @st.cache_data(ttl=60)
 def buscar_jogo(time_procurado, data_selecionada):
     if not time_procurado:
         return None, "Por favor, digite o nome de um time."
-
     data_formatada = data_selecionada.strftime("%Y-%m-%d")
     url_alvo = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{data_formatada}"
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'https://www.sofascore.com/',
-        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-    }
-
     try:
-        response = requests.get(url_alvo, headers=headers, timeout=20)
+        response = scraper.get(url_alvo, timeout=25)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         return None, f"Erro de conexão com a API do Sofascore. O erro foi: {e}"
-
     eventos = response.json().get("events", [])
     for evento in eventos:
         time_casa = evento["homeTeam"]["name"]
@@ -40,28 +31,20 @@ def buscar_jogo(time_procurado, data_selecionada):
                 "Placar Visitante": placar_visitante, "Status": evento["status"]["description"], "Event ID": evento["id"]
             }
             return dados_basicos, None
-
     return None, f"Nenhum jogo encontrado para '{time_procurado}' na data {data_selecionada.strftime('%d/%m/%Y')}."
 
 @st.cache_data(ttl=60)
 def buscar_estatisticas(event_id):
     url_alvo = f"https://api.sofascore.com/api/v1/event/{event_id}/statistics"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'https://www.sofascore.com/',
-    }
-    
     try:
-        response = requests.get(url_alvo, headers=headers, timeout=20)
+        response = scraper.get(url_alvo, timeout=25)
         response.raise_for_status()
         dados = response.json()
         if "error" in dados: return None
     except (requests.exceptions.RequestException, ValueError):
         return None
-
     all_stats_periods = dados.get("statistics", [])
     if not all_stats_periods: return None
-
     estatisticas = {}
     for period_group in all_stats_periods:
         if period_group.get("period") == "ALL":
@@ -71,27 +54,23 @@ def buscar_estatisticas(event_id):
                     valor_casa = item.get("home")
                     valor_visitante = item.get("away")
                     estatisticas[nome] = {"Casa": valor_casa, "Visitante": valor_visitante}
-    
     return estatisticas if estatisticas else None
 
-# --- A INTERFACE DO STREAMLIT CONTINUA A MESMA ---
+# Interface do Streamlit...
 st.set_page_config(page_title="Painel de Futebol Ao Vivo", layout="wide", initial_sidebar_state="collapsed")
 st.title("⚽ Painel de Futebol Ao Vivo")
 st.markdown("Dados fornecidos pela API do Sofascore.")
-
 col1, col2 = st.columns(2)
 with col1:
     time_digitado = st.text_input("Digite o nome do time:", placeholder="Ex: Botafogo, Real Madrid...")
 with col2:
     data_jogo = st.date_input("Selecione a data do jogo", date.today())
-
 if st.button("🔍 Buscar Jogo / Atualizar"):
     if not time_digitado:
         st.warning("Por favor, digite o nome de um time.")
     else:
         with st.spinner(f"Buscando jogo para '{time_digitado}' na data {data_jogo.strftime('%d/%m/%Y')}..."):
             jogo, erro_jogo = buscar_jogo(time_digitado, data_jogo)
-        
         if erro_jogo:
             st.error(erro_jogo)
         elif jogo:
