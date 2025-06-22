@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime
-# A biblioteca 'os' não é mais necessária para ler os secrets no Streamlit
 
 # ==========================
 # Funções
@@ -10,25 +9,27 @@ from datetime import datetime
 
 @st.cache_data(ttl=60)
 def buscar_jogo(time_procurado):
-    """Busca um jogo usando o ScraperAPI como proxy."""
+    """Busca um jogo usando o ScraperAPI com renderização de JavaScript."""
     if not time_procurado:
         return None, "Por favor, digite o nome de um time."
 
-    # Pega a chave da API diretamente dos secrets do Streamlit
-    # st.secrets é um dicionário. Acessamos a chave que definimos no secrets.toml
     try:
         api_key = st.secrets["SCRAPERAPI_KEY"]
     except KeyError:
         return None, "ERRO DE CONFIGURAÇÃO: A chave SCRAPERAPI_KEY não foi encontrada nos Secrets do seu app Streamlit."
 
-    url_alvo = "https://api-web.365scores.com/web/games/current?sport=1&lang=pt&timezone=-3"
-    proxy_url = f"http://api.scraperapi.com?api_key={api_key}&url={url_alvo}"
+    url_alvo = f"https://api-web.365scores.com/web/games/current?sport=1&lang=pt&timezone=-3"
+    
+    # ATUALIZAÇÃO 1: Habilitar o renderizador de JavaScript do ScraperAPI
+    # Adicionamos o parâmetro '&render=true'
+    proxy_url = f"http://api.scraperapi.com?api_key={api_key}&url={url_alvo}&render=true"
 
     try:
-        response = requests.get(proxy_url, timeout=20)
+        # ATUALIZAÇÃO 2: Aumentar o timeout para dar tempo da página ser renderizada
+        response = requests.get(proxy_url, timeout=40)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
-        return None, f"Erro de conexão através do proxy. Detalhe: {e}"
+        return None, f"Erro de conexão através do proxy. O site alvo pode estar lento ou bloqueando. Detalhe: {e}"
 
     jogos = response.json().get("games", [])
     for jogo in jogos:
@@ -48,17 +49,17 @@ def buscar_jogo(time_procurado):
 
 @st.cache_data(ttl=60)
 def buscar_estatisticas(game_id):
-    """Busca estatísticas usando o ScraperAPI como proxy."""
+    """Busca estatísticas usando o ScraperAPI com renderização de JavaScript."""
     try:
         api_key = st.secrets["SCRAPERAPI_KEY"]
     except KeyError:
         return None
     
     url_alvo = f"https://api-web.365scores.com/web/games/{game_id}/stats?lang=pt"
-    proxy_url = f"http://api.scraperapi.com?api_key={api_key}&url={url_alvo}"
+    proxy_url = f"http://api.scraperapi.com?api_key={api_key}&url={url_alvo}&render=true"
     
     try:
-        response = requests.get(proxy_url, timeout=20)
+        response = requests.get(proxy_url, timeout=40)
         response.raise_for_status()
     except requests.exceptions.RequestException:
         return None
@@ -77,9 +78,9 @@ def buscar_estatisticas(game_id):
     return estatisticas
 
 # ==========================
-# Interface do Streamlit (sem alterações na lógica)
+# Interface do Streamlit
 # ==========================
-# ... (o resto do código da interface continua o mesmo do anterior) ...
+# A interface não precisa de alterações.
 
 st.set_page_config(page_title="Painel de Jogo ao Vivo", layout="wide", initial_sidebar_state="collapsed")
 
@@ -89,7 +90,7 @@ st.markdown("Acompanhe placares e estatísticas de jogos em tempo real. Digite o
 time_digitado = st.text_input("Digite o nome do time:", placeholder="Ex: Flamengo, Real Madrid, Corinthians...")
 
 if st.button("🔍 Buscar Jogo / Atualizar"):
-    with st.spinner(f"Buscando jogo para '{time_digitado}'... (via proxy)"):
+    with st.spinner(f"Buscando jogo para '{time_digitado}'... (via proxy com JS)"):
         jogo, erro = buscar_jogo(time_digitado)
 
     if erro:
