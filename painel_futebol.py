@@ -9,36 +9,23 @@ from datetime import datetime
 
 @st.cache_data(ttl=60)
 def buscar_jogo(time_procurado):
-    """Busca um jogo usando ScraperAPI com proxy premium e geolocalização."""
     if not time_procurado:
         return None, "Por favor, digite o nome de um time."
-
     try:
         api_key = st.secrets["SCRAPERAPI_KEY"]
     except KeyError:
         return None, "ERRO DE CONFIGURAÇÃO: A chave SCRAPERAPI_KEY não foi encontrada nos Secrets do seu app Streamlit."
-
-    url_alvo = f"https://api-web.365scores.com/web/games/current?sport=1&lang=pt&timezone=-3"
     
-    # ATUALIZAÇÃO ESTRATÉGICA: Usar parâmetros avançados
-    # premium=true -> Usa os melhores proxies da rede
-    # country_code=br -> Faz a requisição parecer que vem do Brasil
-    # render=true foi REMOVIDO pois a URL é uma API pura
-    payload = {
-        'api_key': api_key,
-        'url': url_alvo,
-        'premium': 'true',
-        'country_code': 'br'
-    }
-
+    url_alvo = f"https://api-web.365scores.com/web/games/current?sport=1&lang=pt&timezone=-3"
+    payload = {'api_key': api_key, 'url': url_alvo, 'premium': 'true', 'country_code': 'br'}
+    
     try:
-        # A requisição agora é feita para a URL do ScraperAPI com os parâmetros
-        response = requests.get('http://api.scraperapi.com', params=payload, timeout=30)
+        # ATUALIZAÇÃO: Aumentando o timeout para 60 segundos
+        response = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
-        return None, f"Erro de conexão através do proxy premium. Detalhe: {e}"
+        return None, f"Erro de conexão através do proxy. O site alvo demorou demais para responder. Detalhe: {e}"
 
-    # A partir daqui, o código é o mesmo
     jogos = response.json().get("games", [])
     for jogo in jogos:
         time_casa = jogo["homeTeam"]["name"]
@@ -52,28 +39,22 @@ def buscar_jogo(time_procurado):
                 "Status": jogo.get("status", {}).get("description", "Desconhecido"), "Game ID": game_id
             }
             return dados_basicos, None
-
+            
     return None, f"Nenhum jogo ao vivo ou recente encontrado para '{time_procurado}'."
 
 @st.cache_data(ttl=60)
 def buscar_estatisticas(game_id):
-    """Busca estatísticas usando ScraperAPI com proxy premium."""
     try:
         api_key = st.secrets["SCRAPERAPI_KEY"]
     except KeyError:
         return None
     
     url_alvo = f"https://api-web.365scores.com/web/games/{game_id}/stats?lang=pt"
-    
-    payload = {
-        'api_key': api_key,
-        'url': url_alvo,
-        'premium': 'true',
-        'country_code': 'br'
-    }
+    payload = {'api_key': api_key, 'url': url_alvo, 'premium': 'true', 'country_code': 'br'}
     
     try:
-        response = requests.get('http://api.scraperapi.com', params=payload, timeout=30)
+        # ATUALIZAÇÃO: Aumentando o timeout para 60 segundos
+        response = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
         response.raise_for_status()
     except requests.exceptions.RequestException:
         return None
@@ -88,7 +69,7 @@ def buscar_estatisticas(game_id):
         home_value = item.get("homeValue", 0)
         away_value = item.get("awayValue", 0)
         estatisticas[nome] = {"Casa": home_value, "Visitante": away_value}
-
+    
     return estatisticas
 
 # ==========================
@@ -101,14 +82,13 @@ st.markdown("Acompanhe placares e estatísticas de jogos em tempo real. Digite o
 time_digitado = st.text_input("Digite o nome do time:", placeholder="Ex: Flamengo, Real Madrid, Corinthians...")
 
 if st.button("🔍 Buscar Jogo / Atualizar"):
-    with st.spinner(f"Buscando jogo para '{time_digitado}'... (via proxy premium)"):
+    with st.spinner(f"Buscando jogo para '{time_digitado}'... (aguardando até 60s)"):
         jogo, erro = buscar_jogo(time_digitado)
-
     if erro:
         st.error(erro)
     elif jogo:
         st.success(f"Jogo encontrado para '{time_digitado}'!")
-
+        # ... (resto da interface)
         st.subheader(f"Status: {jogo['Status']} ({jogo['Data/Hora']})")
         col1, col2, col3 = st.columns([2, 1, 2])
         with col1:
@@ -117,9 +97,7 @@ if st.button("🔍 Buscar Jogo / Atualizar"):
             st.markdown("<h1 style='text-align: center; margin-top: 15px;'>X</h1>", unsafe_allow_html=True)
         with col3:
             st.metric(label=f"✈️ {jogo['Time Visitante']}", value=jogo['Placar Visitante'])
-
         st.divider()
-
         stats = buscar_estatisticas(jogo["Game ID"])
         if stats:
             st.subheader("📊 Estatísticas da Partida")
