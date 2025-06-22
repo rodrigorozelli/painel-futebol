@@ -4,73 +4,57 @@ import pandas as pd
 from datetime import datetime, date
 
 # ==========================
-# Funções (Sofascore + ScraperAPI)
+# Funções (Sofascore + ScraperAPI) - Sem alterações aqui
 # ==========================
 
 @st.cache_data(ttl=60)
 def buscar_jogo(time_procurado):
-    """Busca um jogo na API do Sofascore usando ScraperAPI como proxy."""
+    # (O código desta função continua o mesmo da versão anterior, não precisa mudar)
     if not time_procurado:
         return None, "Por favor, digite o nome de um time."
-
     try:
         api_key = st.secrets["SCRAPERAPI_KEY"]
     except KeyError:
         return None, "ERRO DE CONFIGURAÇÃO: A chave SCRAPERAPI_KEY não foi encontrada nos Secrets. Por favor, adicione-a."
-
     hoje = date.today().strftime("%Y-%m-%d")
     url_alvo = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{hoje}"
-    
-    # Payload para o ScraperAPI. Não precisamos de premium ou render para o Sofascore.
     payload = {'api_key': api_key, 'url': url_alvo}
-
     try:
-        # A requisição é feita para o ScraperAPI, que buscará a URL do Sofascore.
         response = requests.get('http://api.scraperapi.com', params=payload, timeout=25)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         return None, f"Erro de conexão através do proxy. Detalhe: {e}"
-
     eventos = response.json().get("events", [])
     for evento in eventos:
         time_casa = evento["homeTeam"]["name"]
         time_visitante = evento["awayTeam"]["name"]
-        
         if time_procurado.lower() in time_casa.lower() or time_procurado.lower() in time_visitante.lower():
             placar_casa = evento.get("homeScore", {}).get("current", "-")
             placar_visitante = evento.get("awayScore", {}).get("current", "-")
-            
             dados_basicos = {
                 "Data/Hora": datetime.fromtimestamp(evento["startTimestamp"]).strftime("%d/%m/%Y %H:%M"),
                 "Time Casa": time_casa, "Placar Casa": placar_casa, "Time Visitante": time_visitante,
                 "Placar Visitante": placar_visitante, "Status": evento["status"]["description"], "Event ID": evento["id"]
             }
             return dados_basicos, None
-
     return None, f"Nenhum jogo encontrado para '{time_procurado}' na data de hoje."
 
 @st.cache_data(ttl=60)
 def buscar_estatisticas(event_id):
-    """Busca estatísticas na API do Sofascore usando ScraperAPI como proxy."""
+    # (O código desta função continua o mesmo da versão anterior, não precisa mudar)
     try:
         api_key = st.secrets["SCRAPERAPI_KEY"]
-    except KeyError:
-        return None
-    
+    except KeyError: return None
     url_alvo = f"https://api.sofascore.com/api/v1/event/{event_id}/statistics"
     payload = {'api_key': api_key, 'url': url_alvo}
-    
     try:
         response = requests.get('http://api.scraperapi.com', params=payload, timeout=25)
         response.raise_for_status()
         dados = response.json()
         if "error" in dados: return None
-    except (requests.exceptions.RequestException, ValueError):
-        return None
-
+    except (requests.exceptions.RequestException, ValueError): return None
     all_stats = dados.get("statistics", [])
     if not all_stats: return None
-
     estatisticas = {}
     for grupo in all_stats:
         if grupo.get("period") == "ALL":
@@ -80,11 +64,39 @@ def buscar_estatisticas(event_id):
                     valor_casa = row.get("home")
                     valor_visitante = row.get("away")
                     estatisticas[nome] = {"Casa": valor_casa, "Visitante": valor_visitante}
-    
     return estatisticas if estatisticas else None
 
+@st.cache_data(ttl=300) # Cache de 5 minutos
+def listar_jogos_do_dia():
+    """Função de depuração: Lista todos os jogos do dia."""
+    try:
+        api_key = st.secrets["SCRAPERAPI_KEY"]
+    except KeyError:
+        return pd.DataFrame(), "ERRO DE CONFIGURAÇÃO: Chave da API não encontrada."
+
+    hoje = date.today().strftime("%Y-%m-%d")
+    url_alvo = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{hoje}"
+    payload = {'api_key': api_key, 'url': url_alvo}
+
+    try:
+        response = requests.get('http://api.scraperapi.com', params=payload, timeout=25)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        return pd.DataFrame(), f"Erro de conexão: {e}"
+
+    eventos = response.json().get("events", [])
+    jogos_lista = []
+    for evento in eventos:
+        jogos_lista.append({
+            "Time da Casa": evento["homeTeam"]["name"],
+            "Time Visitante": evento["awayTeam"]["name"],
+            "Campeonato": evento["tournament"]["name"]
+        })
+    
+    return pd.DataFrame(jogos_lista), None
+
 # ==========================
-# Interface do Streamlit (sem alterações)
+# Interface do Streamlit (com a nova ferramenta)
 # ==========================
 st.set_page_config(page_title="Painel de Futebol Ao Vivo", layout="wide", initial_sidebar_state="collapsed")
 st.title("⚽ Painel de Futebol Ao Vivo")
@@ -98,12 +110,10 @@ if st.button("🔍 Buscar Jogo / Atualizar"):
     else:
         with st.spinner(f"Buscando jogo para '{time_digitado}'... (via proxy)"):
             jogo, erro = buscar_jogo(time_digitado)
-        
         if erro:
             st.error(erro)
         elif jogo:
             st.success(f"Jogo encontrado para '{time_digitado}'!")
-            # ... (o resto do código da interface continua igual)
             st.subheader(f"Status: {jogo['Status']} ({jogo['Data/Hora']})")
             col1, col2, col3 = st.columns([2, 1, 2])
             with col1:
@@ -123,3 +133,18 @@ if st.button("🔍 Buscar Jogo / Atualizar"):
                 st.info("ℹ️ Estatísticas não disponíveis para esta partida no momento.")
 else:
     st.info("Digite o nome de um time e clique no botão para carregar os dados.")
+
+# --- FERRAMENTA DE ANÁLISE ---
+st.divider()
+with st.expander("🕵️ Ver todos os jogos de hoje (para análise)"):
+    if st.button("Listar todos os jogos"):
+        with st.spinner("Buscando lista completa de jogos..."):
+            df_todos_jogos, erro_lista = listar_jogos_do_dia()
+        
+        if erro_lista:
+            st.error(erro_lista)
+        elif not df_todos_jogos.empty:
+            st.success("Lista de jogos carregada!")
+            st.dataframe(df_todos_jogos, use_container_width=True)
+        else:
+            st.info("Nenhum jogo encontrado na API para a data de hoje.")
